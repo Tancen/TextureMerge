@@ -202,6 +202,13 @@ namespace TextureMerge
             UpdateSourceGrid(Channel.Red);
         }
 
+        private async void SrcRA(object sender, RoutedEventArgs e)
+        {
+            merge.SetChannelSource(Channel.Red, Channel.Alpha);
+            RedCh.SetImageThumbnail(await merge.GetChannelThumbnailAsync(Channel.Red));
+            UpdateSourceGrid(Channel.Red);
+        }
+
         private async void SrcGR(object sender, RoutedEventArgs e)
         {
             merge.SetChannelSource(Channel.Green, Channel.Red);
@@ -219,6 +226,13 @@ namespace TextureMerge
         private async void SrcGB(object sender, RoutedEventArgs e)
         {
             merge.SetChannelSource(Channel.Green, Channel.Blue);
+            GreenCh.SetImageThumbnail(await merge.GetChannelThumbnailAsync(Channel.Green));
+            UpdateSourceGrid(Channel.Green);
+        }
+
+        private async void SrcGA(object sender, RoutedEventArgs e)
+        {
+            merge.SetChannelSource(Channel.Green, Channel.Alpha);
             GreenCh.SetImageThumbnail(await merge.GetChannelThumbnailAsync(Channel.Green));
             UpdateSourceGrid(Channel.Green);
         }
@@ -244,6 +258,13 @@ namespace TextureMerge
             UpdateSourceGrid(Channel.Blue);
         }
 
+        private async void SrcBA(object sender, RoutedEventArgs e)
+        {
+            merge.SetChannelSource(Channel.Blue, Channel.Alpha);
+            BlueCh.SetImageThumbnail(await merge.GetChannelThumbnailAsync(Channel.Blue));
+            UpdateSourceGrid(Channel.Blue);
+        }
+
         private async void SrcAR(object sender, RoutedEventArgs e)
         {
             merge.SetChannelSource(Channel.Alpha, Channel.Red);
@@ -261,6 +282,13 @@ namespace TextureMerge
         private async void SrcAB(object sender, RoutedEventArgs e)
         {
             merge.SetChannelSource(Channel.Alpha, Channel.Blue);
+            AlphaCh.SetImageThumbnail(await merge.GetChannelThumbnailAsync(Channel.Alpha));
+            UpdateSourceGrid(Channel.Alpha);
+        }
+
+        private async void SrcAA(object sender, RoutedEventArgs e)
+        {
+            merge.SetChannelSource(Channel.Alpha, Channel.Alpha);
             AlphaCh.SetImageThumbnail(await merge.GetChannelThumbnailAsync(Channel.Alpha));
             UpdateSourceGrid(Channel.Alpha);
         }
@@ -316,6 +344,7 @@ namespace TextureMerge
                 LoadToChannelAsync(Channel.Red, path);
                 LoadToChannelAsync(Channel.Green, path);
                 LoadToChannelAsync(Channel.Blue, path);
+                LoadToChannelAsync(Channel.Alpha, path);
             }
         }
 

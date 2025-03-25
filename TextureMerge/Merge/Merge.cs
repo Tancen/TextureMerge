@@ -29,9 +29,6 @@ namespace TextureMerge
             if (!CheckResolution(out int width, out int height))
                 throw new InvalidOperationException("Resolution missmatch");
 
-            if (red?.Image.HasAlpha == true || green?.Image.HasAlpha == true || blue?.Image.HasAlpha == true)
-                throw new ArgumentException("Bitmap has alpha channel");
-
             var result = new TMImage(new MagickImage(fillColor, width, height));
             result.Image.Depth = depth == -1 ? GetHighestDepth() : depth;
 
@@ -48,37 +45,33 @@ namespace TextureMerge
             var redPixels = red is null ? CreateArrayWithColor(width * height * 3, fillColor.R) : red.GetPixelArray();
             var greenPixels = green is null ? CreateArrayWithColor(width * height * 3, fillColor.G) : green.GetPixelArray();
             var bluePixels = blue is null ? CreateArrayWithColor(width * height * 3, fillColor.B) : blue.GetPixelArray();
-            var alphaPixels = alpha is null ? CreateArrayWithColor(width * height * 3, fillColor.A) : alpha.GetPixelArray();
+            var alphaPixels = alpha is null ? CreateArrayWithColor(width * height * 4, fillColor.A) : alpha.GetPixelArray();
 
-            for (int i = 0; i < resultPixels.Length; i++)
+            var NUM_SRC_PIXEL_BYTES_RED = red is null ? 3 : (red.Image.HasAlpha ? 4 : 3);
+            var NUM_SRC_PIXEL_BYTES_GREEN = green is null ? 3 : (green.Image.HasAlpha ? 4 : 3);
+            var NUM_SRC_PIXEL_BYTES_BLUE = blue is null ? 3 : (blue.Image.HasAlpha ? 4 : 3);
+            var NUM_SRC_PIXEL_BYTES_ALPHA = 4;
+            var NUM_DST_PIXEL_BYTES = result.Image.HasAlpha ? 4 : 3;
+
+            for (int y = 0; y < height; y++)
             {
-                var redi = i - (i % 3) + (int)redChSource;
-                var greeni = i - (i % 3) + (int)greenChSource;
-                var bluei = i - (i % 3) + (int)blueChSource;
-                var alphai = i - (i % 3) + (int)alphaChSource;
+                for (int x = 0; x < width; x++)
+                {
+                    int i = y * width + x;
+                    int iDst = i * NUM_DST_PIXEL_BYTES;
+                    int iSrcRed = i * NUM_SRC_PIXEL_BYTES_RED;
+                    int iSrcGreen = i * NUM_SRC_PIXEL_BYTES_GREEN;
+                    int iSrcBlue = i * NUM_SRC_PIXEL_BYTES_BLUE;
+                    int iSrcAlpha= i * NUM_SRC_PIXEL_BYTES_ALPHA;
 
-                if (alpha is null)
-                {
-                    switch (i % 3)
-                    {
-                        case 0: resultPixels[i] = redPixels[redi]; break;
-                        case 1: resultPixels[i] = greenPixels[greeni]; break;
-                        case 2: resultPixels[i] = bluePixels[bluei]; break;
-                        default: throw new InvalidOperationException("Impossible Exception");
-                    };
-                }
-                else
-                {
-                    switch (i % 4)
-                    {
-                        case 0: resultPixels[i] = redPixels[(i / 4) * 3 + (redi % 3)]; break;
-                        case 1: resultPixels[i] = greenPixels[(i / 4) * 3 + (greeni % 3)]; break;
-                        case 2: resultPixels[i] = bluePixels[(i / 4) * 3 + (bluei % 3)]; break;
-                        case 3: resultPixels[i] = alphaPixels[(i / 4) * 3 + (alphai % 3)]; break;
-                        default: throw new InvalidOperationException("Impossible Exception");
-                    };
+                    resultPixels[iDst + 0] = redPixels[iSrcRed + (int)redChSource];
+                    resultPixels[iDst + 1] = greenPixels[iSrcGreen + (int)greenChSource];
+                    resultPixels[iDst + 2] = bluePixels[iSrcBlue + (int)blueChSource];
+                    if (result.Image.HasAlpha)
+                        resultPixels[iDst + 3] = alphaPixels[iSrcAlpha + (int)alphaChSource];
                 }
             }
+
             result.SetPixels(resultPixels);
             return result;
         }
@@ -303,23 +296,35 @@ namespace TextureMerge
             });
         }
 
+        
         private static TMImage ExtractChannel(TMImage sourceBitmap, Channel channel)
         {
-            if (channel == Channel.Alpha)
-                throw new ArgumentException("Alpha can't be source channel");
-
             if (sourceBitmap == null)
                 throw new ArgumentException("Source bitmap is null");
 
-            if (sourceBitmap.Image.HasAlpha)
-                throw new ArgumentException("Source bitmap has alpha channel");
+            if (channel == Channel.Alpha && !sourceBitmap.Image.HasAlpha)
+                throw new ArgumentException("Source bitmap has no alpha channel");
 
-            var result = new TMImage(new MagickImage(new MagickColor(0, 0, 0), sourceBitmap.Image.Width, sourceBitmap.Image.Height), sourceBitmap.FileName);
+            var NUM_PIXEL_BYTES = 0;
+            MagickImage mgkImage = null;
+            if (sourceBitmap.Image.HasAlpha)
+            {
+                NUM_PIXEL_BYTES = 4;
+                mgkImage = new MagickImage(new MagickColor(0, 0, 0, 0), sourceBitmap.Image.Width, sourceBitmap.Image.Height);
+                mgkImage.Alpha(AlphaOption.On);
+            }
+            else
+            {
+                NUM_PIXEL_BYTES = 3;
+                mgkImage = new MagickImage(new MagickColor(0, 0, 0), sourceBitmap.Image.Width, sourceBitmap.Image.Height);
+            }
+
+            var result = new TMImage(mgkImage, sourceBitmap.FileName);
             var pixels = result.GetPixelArray();
             var sourcePixels = sourceBitmap.GetPixelArray();
             for (int i = 0; i < pixels.Length; i++)
             {
-                pixels[i] = sourcePixels[i - (i % 3) + (int)channel];
+                pixels[i] = sourcePixels[i - (i % NUM_PIXEL_BYTES) + (int)channel];
             }
             result.SetPixels(pixels);
             return result;
@@ -358,14 +363,11 @@ namespace TextureMerge
             if (path == string.Empty)
                 throw new ArgumentException("Invalid path");
 
-            if (channelSource == Channel.Alpha)
-                throw new ArgumentException("Alpha can't be source channel");
-
 
             var source = new TMImage(new MagickImage(path), Path.GetFileName(path)) ?? throw new ArgumentException("Failed to load image");
 
-            source.Image.Alpha(AlphaOption.Off);
-            source.Image.ColorType = ColorType.TrueColor;
+            source.Image.Alpha(AlphaOption.On);
+            source.Image.ColorType = ColorType.TrueColorAlpha;
             source.Image.AutoOrient();
             source.Image.ColorSpace = ColorSpace.sRGB;
 
@@ -394,9 +396,6 @@ namespace TextureMerge
 
         public void SetChannelSource(Channel channel, Channel channelSource)
         {
-            if (channelSource == Channel.Alpha)
-                throw new ArgumentException("Alpha can't be source channel");
-
             switch (channel)
             {
                 case Channel.Red:
