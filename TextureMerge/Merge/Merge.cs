@@ -12,7 +12,12 @@ namespace TextureMerge
         private Channel redChSource = Channel.Red, greenChSource = Channel.Green,
             blueChSource = Channel.Blue, alphaChSource = Channel.Red;
 
-        public Task<TMImage> DoMergeAsync(MagickColor fillColor, int depth = -1)
+        public bool IsResultImageHasAlpha()
+        {
+            return alpha != null;
+        }
+
+        public Task<TMImage> DoMergeAsync(MagickColor fillColor, uint depth = 0)
         {
             return Task.Run(() =>
             {
@@ -21,62 +26,68 @@ namespace TextureMerge
             });
         }
 
-        public TMImage DoMerge(MagickColor fillColor, int depth = -1)
+        public TMImage DoMerge(MagickColor fillColor, uint depth = 0)
         {
             if (red is null && green is null && blue is null && alpha is null)
                 throw new InvalidOperationException("No image loaded");
 
-            if (!CheckResolution(out int width, out int height))
+            if (!CheckResolution(out uint width, out uint height))
                 throw new InvalidOperationException("Resolution missmatch");
 
             var result = new TMImage(new MagickImage(fillColor, width, height));
-            result.Image.Depth = depth == -1 ? GetHighestDepth() : depth;
+            result.Image.Depth = depth == 0 ? GetHighestDepth() : depth;
 
             if (alpha is null)
                 result.Image.Alpha(AlphaOption.Off);
             else
                 result.Image.Alpha(AlphaOption.On);
 
-            var resultPixels = result.GetPixelArray();
+            var redPixels = red is null ? CreateArrayWithColor(width * height * 3, fillColor.R) : ExtractSingleChannel(red, redChSource);
+            var greenPixels = green is null ? CreateArrayWithColor(width * height * 3, fillColor.G) : ExtractSingleChannel(green, greenChSource);
+            var bluePixels = blue is null ? CreateArrayWithColor(width * height * 3, fillColor.B) : ExtractSingleChannel(blue, blueChSource);
+            var alphaPixels = alpha is null ? CreateArrayWithColor(width * height * 4, fillColor.A) : ExtractSingleChannel(alpha, alphaChSource);
 
-            if ((alpha == null && resultPixels.Length % 3 != 0) || (alpha != null && resultPixels.Length % 4 != 0))
-                throw new InvalidOperationException("Internal error: Wrong pixels");
-
-            var redPixels = red is null ? CreateArrayWithColor(width * height * 3, fillColor.R) : red.GetPixelArray();
-            var greenPixels = green is null ? CreateArrayWithColor(width * height * 3, fillColor.G) : green.GetPixelArray();
-            var bluePixels = blue is null ? CreateArrayWithColor(width * height * 3, fillColor.B) : blue.GetPixelArray();
-            var alphaPixels = alpha is null ? CreateArrayWithColor(width * height * 4, fillColor.A) : alpha.GetPixelArray();
-
-            var NUM_SRC_PIXEL_BYTES_RED = red is null ? 3 : (red.Image.HasAlpha ? 4 : 3);
-            var NUM_SRC_PIXEL_BYTES_GREEN = green is null ? 3 : (green.Image.HasAlpha ? 4 : 3);
-            var NUM_SRC_PIXEL_BYTES_BLUE = blue is null ? 3 : (blue.Image.HasAlpha ? 4 : 3);
-            var NUM_SRC_PIXEL_BYTES_ALPHA = 4;
             var NUM_DST_PIXEL_BYTES = result.Image.HasAlpha ? 4 : 3;
+            var resultPixels = new ushort[width * height * NUM_DST_PIXEL_BYTES];
 
-            for (int y = 0; y < height; y++)
+            for (int i = 0; i < width * height; i++)
             {
-                for (int x = 0; x < width; x++)
-                {
-                    int i = y * width + x;
-                    int iDst = i * NUM_DST_PIXEL_BYTES;
-                    int iSrcRed = i * NUM_SRC_PIXEL_BYTES_RED;
-                    int iSrcGreen = i * NUM_SRC_PIXEL_BYTES_GREEN;
-                    int iSrcBlue = i * NUM_SRC_PIXEL_BYTES_BLUE;
-                    int iSrcAlpha= i * NUM_SRC_PIXEL_BYTES_ALPHA;
-
-                    resultPixels[iDst + 0] = redPixels[iSrcRed + (int)redChSource];
-                    resultPixels[iDst + 1] = greenPixels[iSrcGreen + (int)greenChSource];
-                    resultPixels[iDst + 2] = bluePixels[iSrcBlue + (int)blueChSource];
-                    if (result.Image.HasAlpha)
-                        resultPixels[iDst + 3] = alphaPixels[iSrcAlpha + (int)alphaChSource];
-                }
+                resultPixels[i * NUM_DST_PIXEL_BYTES + 0] = redPixels[i];
+                resultPixels[i * NUM_DST_PIXEL_BYTES + 1] = greenPixels[i];
+                resultPixels[i * NUM_DST_PIXEL_BYTES + 2] = bluePixels[i];
+                if (NUM_DST_PIXEL_BYTES == 4)
+                    resultPixels[i * NUM_DST_PIXEL_BYTES + 3] = alphaPixels[i];
             }
-
             result.SetPixels(resultPixels);
+
             return result;
         }
 
-        private ushort[] CreateArrayWithColor(int capacity, ushort color)
+        private ushort[] ExtractSingleChannel(TMImage image, Channel channel)
+        {
+            var NUM_PIXEL_BYTES = image.Image.HasAlpha ? 4 : 3;
+            var dstPixels = new ushort[image.Image.Width * image.Image.Height];
+
+            var srcPixels = image.GetPixelArray();
+            for (int i = 0; i < dstPixels.Length; i++)
+            {
+                dstPixels[i] = srcPixels[i * NUM_PIXEL_BYTES + (int)channel];
+            }
+            return dstPixels;
+        }
+
+        private void WriteUShortArrayToFile(ushort[] data, string path)
+        {
+            FileStream fs = new FileStream(path, FileMode.Create);
+
+            byte[] bytes = new byte[data.Length * 2];
+            Buffer.BlockCopy(data, 0, bytes, 0, bytes.Length);
+            fs.Write(bytes, 0, bytes.Length);
+
+            fs.Close();
+        }
+
+        private ushort[] CreateArrayWithColor(uint capacity, ushort color)
         {
             var arr = new ushort[capacity];
             for (int i = 0; i < arr.Length; i++)
@@ -112,40 +123,27 @@ namespace TextureMerge
             return true;
         }
 
-        public bool IsDepthSame()
+        public bool IsDepthSame(out uint depth)
         {
-            int depth = -1;
-            if (red != null)
+            depth = 0;
+
+            foreach (TMImage image in new TMImage[] { red, green, blue, alpha })
             {
-                depth = red.Image.Depth;
+                if (image != null)
+                {
+                    if (depth == 0)
+                        depth = image.Image.Depth;
+                    else if (depth != image.Image.Depth)
+                        return false;
+                }
             }
-            if (green != null)
-            {
-                if (depth == -1)
-                    depth = green.Image.Depth;
-                else if (depth != green.Image.Depth)
-                    return false;
-            }
-            if (blue != null)
-            {
-                if (depth == -1)
-                    depth = blue.Image.Depth;
-                else if (depth != blue.Image.Depth)
-                    return false;
-            }
-            if (alpha != null)
-            {
-                if (depth == -1)
-                    depth = alpha.Image.Depth;
-                if (depth != alpha.Image.Depth)
-                    return false;
-            }
-            return true;
+
+            return depth != 0;
         }
 
-        private int GetHighestDepth()
+        private uint GetHighestDepth()
         {
-            int max = 0;
+            uint max = 0;
             if (red != null)
                 max = red.Image.Depth > max ? red.Image.Depth : max;
             if (green != null)
@@ -158,7 +156,7 @@ namespace TextureMerge
             return max;
         }
 
-        public bool CheckResolution(out int width, out int height)
+        public bool CheckResolution(out uint width, out uint height)
         {
             width = height = 0;
 
@@ -211,7 +209,7 @@ namespace TextureMerge
 
         public bool CheckResolution() => CheckResolution(out _, out _);
 
-        public Task<Merge> ResizeAsync(int width, int height, bool stretch, MagickColor fillColor = null)
+        public Task<Merge> ResizeAsync(uint width, uint height, bool stretch, MagickColor fillColor = null)
         {
             return Task.Run(() =>
             {
@@ -220,7 +218,7 @@ namespace TextureMerge
             });
         }
 
-        public Merge Resize(int width, int height, bool stretch, MagickColor fillColor = null)
+        public Merge Resize(uint width, uint height, bool stretch, MagickColor fillColor = null)
         {
             if (width < 1 || height < 1)
                 throw new ArgumentException("width and height must be greater than 0");
@@ -231,7 +229,7 @@ namespace TextureMerge
                 redChSource = merge.redChSource,
                 greenChSource = merge.greenChSource,
                 blueChSource = merge.blueChSource,
-                alphaChSource = merge.alphaChSource
+                alphaChSource = merge.alphaChSource,
             };
 
             if (red != null)
@@ -246,22 +244,25 @@ namespace TextureMerge
             return newInst;
         }
 
-        private static TMImage ResizeImage(TMImage source, int width, int height, bool stretch, MagickColor fillColor = null)
+        private static TMImage ResizeImage(TMImage source, uint width, uint height, bool stretch, MagickColor fillColor = null)
         {
             var result = source.Clone();
-            if (stretch)
+            if (result.Image.Width != width || result.Image.Height != height)
             {
-                var geo = new MagickGeometry(width, height)
+                if (stretch)
                 {
-                    IgnoreAspectRatio = true
-                };
-                result.Image.Resize(geo);
-            }
-            else
-            {
-                result.Image.Resize(width, height);
-                result.Image.Extent(width, height, Gravity.Center,
-                    fillColor ?? new MagickColor(0, 0, 0));
+                    var geo = new MagickGeometry(width, height)
+                    {
+                        IgnoreAspectRatio = true
+                    };
+                    result.Image.Resize(geo);
+                }
+                else
+                {
+                    MagickColor color = source.Image.HasAlpha ? new MagickColor(0, 0, 0, 1) : new MagickColor(0, 0, 0);
+                    result.Image.Resize(width, height);
+                    result.Image.Extent(width, height, Gravity.Center, fillColor ?? color);
+                }
             }
 
             return result;
@@ -277,17 +278,19 @@ namespace TextureMerge
             if (newImage == null)
                 throw new ArgumentException("Source bitmap is null");
 
-            if (newImage.Image.HasAlpha)
-                throw new ArgumentException("Source bitmap has alpha channel");
-
             AlterImage(channel, (image, sourceChannel) =>
             {
-                if (image.Image.HasAlpha)
-                    throw new ArgumentException("Image has alpha channel");
-
                 var pixels = image.GetPixelArray();
                 var newPixels = newImage.GetPixelArray();
-                for (int i = (int)sourceChannel; i < pixels.Length; i += 3)
+
+                if (newImage.Image.Width != image.Image.Width || newImage.Image.Height != image.Image.Height)
+                    throw new ArgumentException("Source image resolution is not equal to the new image");
+
+                if (newImage.Image.HasAlpha != image.Image.HasAlpha)
+                    throw new ArgumentException("Source image and new image have different alpha value");
+
+                var NUM_PIXEL_BYTES = newImage.Image.HasAlpha ? 4 : 3;
+                for (int i = (int)sourceChannel; i < pixels.Length; i += NUM_PIXEL_BYTES)
                 {
                     pixels[i] = newPixels[i];
                 }
@@ -338,6 +341,7 @@ namespace TextureMerge
             var thumb = sourceBitmap.Clone();
             thumb.Image.Thumbnail(512, 512);
             var result = ExtractChannel(thumb, channel);
+            result.Image.Alpha(AlphaOption.Off);
             return result;
         }
 

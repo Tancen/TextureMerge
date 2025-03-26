@@ -31,7 +31,7 @@ namespace TextureMerge
             return null;
         }
 
-        private async Task<Merge> ResizeMergeSetAsync(Merge merge, int width, int height)
+        private async Task<Merge> ResizeMergeSetAsync(Merge merge, uint width, uint height)
         {
             var resizeDialog = new Resize(width, height)
             {
@@ -42,9 +42,9 @@ namespace TextureMerge
                 try
                 {
                     SetStatus("Resizeing...", statusBlueColor);
-                    return await merge.ResizeAsync(resizeDialog.NewWidth, resizeDialog.NewHeight,
+                    return await merge.ResizeAsync((uint)resizeDialog.NewWidth, (uint)resizeDialog.NewHeight,
                         resizeDialog.DoStretch.IsChecked == true,
-                        ColorToMagick(defaultColor));
+                        ColorToMagick(defaultColor, merge.IsResultImageHasAlpha(), 1));
                 }
                 catch (ArgumentException ex)
                 {
@@ -64,9 +64,10 @@ namespace TextureMerge
             }
         }
 
-        private int GetDepth(Merge merge)
+        private uint GetDepth(Merge merge)
         {
-            if (!merge.IsDepthSame())
+            uint depth = 0;
+            if (!merge.IsDepthSame(out depth))
             {
                 var depthDialog = new Depth()
                 {
@@ -74,24 +75,20 @@ namespace TextureMerge
                 };
                 if (depthDialog.ShowDialog() == true)
                 {
-                    return depthDialog.NewDepth;
-                }
-                else
-                {
-                    return -2;
+                    depth = depthDialog.NewDepth;
                 }
             }
-            return -1;
+            return depth;
         }
 
-        private async Task<bool> SaveMerge(Merge merge, int depth, string path)
+        private async Task<bool> SaveMerge(Merge merge, uint depth, string path)
         {
             if (Directory.Exists(PathToSave.Text))
             {
                 try
                 {
                     SetStatus("Merging...", statusBlueColor);
-                    var result = await merge.DoMergeAsync(ColorToMagick(defaultColor), depth);
+                    var result = await merge.DoMergeAsync(ColorToMagick(defaultColor, merge.IsResultImageHasAlpha(), 1), depth);
 
                     SetStatus("Saving...", statusBlueColor);
                     await result.SaveAsync(path);
@@ -116,7 +113,7 @@ namespace TextureMerge
 
         private async void ButtonMerge(object sender, RoutedEventArgs e)
         {
-            bool isResolutionValid = merge.CheckResolution(out int width, out int height);
+            bool isResolutionValid = merge.CheckResolution(out uint width, out uint height);
             if (width == 0 || height == 0)
             {
                 MessageDialog.Show("No images loaded", type: MessageDialog.Type.Error);
@@ -155,8 +152,8 @@ namespace TextureMerge
             if (correct == null)
                 return;
 
-            int depth = GetDepth(correct);
-            if (depth == -2)
+            uint depth = GetDepth(correct);
+            if (depth == 0)
             {
                 MessageDialog.Show("Operation aborted");
                 return;
@@ -348,11 +345,9 @@ namespace TextureMerge
             (ushort)((value * ushort.MaxValue) / 255);
 
 
-        private MagickColor ColorToMagick(Color color) =>
-            new MagickColor(
-                ByteToUshortKeepRatio(color.R),
-                ByteToUshortKeepRatio(color.G),
-                ByteToUshortKeepRatio(color.B));
+        private MagickColor ColorToMagick(Color color, bool hasAlpha, ushort alphaDefaultValue) =>
+            hasAlpha ? new MagickColor(ByteToUshortKeepRatio(color.R), ByteToUshortKeepRatio(color.G), ByteToUshortKeepRatio(color.B), alphaDefaultValue) 
+            : new MagickColor(ByteToUshortKeepRatio(color.R), ByteToUshortKeepRatio(color.G), ByteToUshortKeepRatio(color.B));
     
         private async void InvertImageAsync(Channel channel)
         {
@@ -367,6 +362,7 @@ namespace TextureMerge
             {
                 TMImage image = merge.GetImage(channel);
                 TMImage newImage = ImageEdits.Invert(image);
+
                 merge.PutEditedImage(newImage, channel);
                 var imgSlot = mapper.slots[(int)channel].image;
                 imgSlot.SetImageThumbnail(await merge.GetChannelThumbnailAsync(channel));
@@ -391,6 +387,7 @@ namespace TextureMerge
             {
                 TMImage image = merge.GetImage(channel);
                 TMImage newImage = ImageEdits.AutoLevel(image);
+
                 merge.PutEditedImage(newImage, channel);
                 var imgSlot = mapper.slots[(int)channel].image;
                 imgSlot.SetImageThumbnail(await merge.GetChannelThumbnailAsync(channel));
