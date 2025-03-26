@@ -2,6 +2,9 @@
 using System.Diagnostics;
 using System.Net;
 using System.Reflection;
+using System.Text.RegularExpressions;
+using System.Collections;
+using System.Collections.Generic;
 
 namespace TextureMerge
 {
@@ -40,7 +43,9 @@ namespace TextureMerge
             }
 
             string latestVersion = GetValue(content, "tag_name");
-            if (version != latestVersion && (forced || Config.Current.SkipVersion != latestVersion))
+            var latestVersionNums = GetVersionNums(latestVersion);
+            var currentVersionNums = GetVersionNums(version);
+            if (CompareVersionNums(latestVersionNums, currentVersionNums) > 0 && (forced || Config.Current.SkipVersion != latestVersion))
             {
                 var updateDialog = new UpdateAvailable(latestVersion);
                 updateDialog.ShowDialog();
@@ -65,6 +70,48 @@ namespace TextureMerge
             {
                 MessageDialog.Show("No updates");
             }
+        }
+
+        private static uint[] GetVersionNums(string verstion)
+        {
+            var nums = new List<uint>();
+
+            string r = @"[0-9]+";
+            Regex reg = new Regex(r, RegexOptions.IgnoreCase | RegexOptions.Singleline, TimeSpan.FromSeconds(2));
+            MatchCollection mc = reg.Matches(verstion);
+            foreach (Match m in mc)
+            {
+               uint n = uint.Parse(m.Groups[0].Value);
+                nums.Add(n);
+            }
+
+            return nums.ToArray();
+        }
+
+        private static int CompareVersionNums(uint[] version1, uint[] version2)
+        {
+            if (version1.Length == 0 && version2.Length == 0)
+                return 0;
+            else if (version1.Length == 0)
+                return -1;
+            else if (version2.Length == 0)
+                return 1;
+
+            int i = 0;
+            for (; i < version1.Length && i < version2.Length; i++)
+            {
+                if (version1[i] > version2[i])
+                    return 1;
+                else if (version1[i] < version2[i])
+                    return -1;
+            }
+
+            if (i < version1.Length)
+                return 1;
+            else if (i < version2.Length)
+                return -1;
+
+            return 0;
         }
 
         private static string GetValue(string content, string key)
