@@ -113,13 +113,15 @@ namespace TextureMerge
             }
 
             var pixels = img.GetPixelArray();
-            for (int i = 0; i < pixels.Length; i++)
+            if (img.Image.HasAlpha)
+                return false;
+            
+            for (int i = 0; i < pixels.Length; i += 3)
             {
-                if (i % 3 != 0)
-                    continue;
                 if (pixels[i] != pixels[i + 1] || pixels[i] != pixels[i + 2])
                     return false;
             }
+            
             return true;
         }
 
